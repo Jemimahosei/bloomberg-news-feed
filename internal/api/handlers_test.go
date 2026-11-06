@@ -52,6 +52,61 @@ func get(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
+func TestNewsEndpoints(t *testing.T) {
+	srv := testServer()
+	h := srv.Routes()
+
+	// Featured is the newest article (a1, Oct 26 09:00).
+	rec := get(t, h, "/api/news/get-featured-article")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("featured status = %d", rec.Code)
+	}
+	var one struct {
+		Data model.Article `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &one); err != nil {
+		t.Fatalf("decode featured: %v", err)
+	}
+	if one.Data.ID != "a1" {
+		t.Fatalf("featured id = %q, want a1 (newest)", one.Data.ID)
+	}
+
+	// Newsfeed returns the full list, newest first.
+	rec = get(t, h, "/api/news/get-newsfeed")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("newsfeed status = %d", rec.Code)
+	}
+	var body struct {
+		Data  []model.Article `json:"data"`
+		Count int             `json:"count"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode newsfeed: %v", err)
+	}
+	if body.Count != 2 || body.Data[0].ID != "a1" || body.Data[1].ID != "a2" {
+		t.Fatalf("newsfeed = %+v", body)
+	}
+
+	// Limit is respected.
+	rec = get(t, h, "/api/news/get-newsfeed?limit=1")
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Count != 1 {
+		t.Fatalf("newsfeed limit = %+v", body)
+	}
+
+	// Empty store: featured is 404, newsfeed is an empty list.
+	empty := &Server{Store: store.New(), Cache: &stubCache{}, TTL: time.Minute}
+	eh := empty.Routes()
+	if rec := get(t, eh, "/api/news/get-featured-article"); rec.Code != http.StatusNotFound {
+		t.Fatalf("empty featured = %d, want 404", rec.Code)
+	}
+	rec = get(t, eh, "/api/news/get-newsfeed")
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusOK || body.Count != 0 {
+		t.Fatalf("empty newsfeed = %d %+v, want 200 count 0", rec.Code, body)
+	}
+}
+
 func TestHeadlinesAndFilters(t *testing.T) {
 	srv := testServer()
 	h := srv.Routes()

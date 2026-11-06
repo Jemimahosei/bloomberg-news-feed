@@ -93,3 +93,73 @@ func TestStripHTML(t *testing.T) {
 		t.Errorf("whitespace not collapsed")
 	}
 }
+
+const imageRSS = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+<channel>
+<title>Test Feed</title>
+<item>
+<title>Media content wins</title>
+<link>https://example.com/mc</link>
+<description>Has both media:content and media:thumbnail.</description>
+<pubDate>Mon, 26 Oct 2026 09:00:00 GMT</pubDate>
+<media:content url="https://example.com/full.jpg" medium="image"/>
+<media:thumbnail url="https://example.com/thumb.jpg"/>
+</item>
+<item>
+<title>Thumbnail fallback</title>
+<link>https://example.com/th</link>
+<description>Thumbnail only; audio enclosure must be ignored.</description>
+<pubDate>Mon, 26 Oct 2026 08:00:00 GMT</pubDate>
+<media:thumbnail url="https://example.com/thumb2.jpg"/>
+<enclosure url="https://example.com/audio.mp3" type="audio/mpeg"/>
+</item>
+<item>
+<title>Image enclosure</title>
+<link>https://example.com/enc</link>
+<description>Image enclosure, no media tags.</description>
+<pubDate>Mon, 26 Oct 2026 07:00:00 GMT</pubDate>
+<enclosure url="https://example.com/pic.png" type="image/png"/>
+</item>
+<item>
+<title>Audio only</title>
+<link>https://example.com/aud</link>
+<description>Audio enclosure and nothing else: no image.</description>
+<pubDate>Mon, 26 Oct 2026 06:00:00 GMT</pubDate>
+<enclosure url="https://example.com/audio.mp3" type="audio/mpeg"/>
+</item>
+<item>
+<title>Protocol relative</title>
+<link>https://example.com/pr</link>
+<description>Protocol-relative media URL gets an https: prefix.</description>
+<pubDate>Mon, 26 Oct 2026 05:00:00 GMT</pubDate>
+<media:content url="//example.com/proto.jpg" medium="image"/>
+</item>
+</channel>
+</rss>`
+
+// TestParseRSSImages checks image extraction priority: media:content
+// (image) > media:thumbnail > image enclosure, and that non-image
+// enclosures never produce an image URL.
+func TestParseRSSImages(t *testing.T) {
+	src := Source{Name: "Test", URL: "https://example.com/rss", Category: "business"}
+	arts, err := parseRSS([]byte(imageRSS), src)
+	if err != nil {
+		t.Fatalf("parseRSS: %v", err)
+	}
+	if len(arts) != 5 {
+		t.Fatalf("expected 5 articles, got %d", len(arts))
+	}
+	want := map[string]string{
+		"Media content wins":  "https://example.com/full.jpg",
+		"Thumbnail fallback":  "https://example.com/thumb2.jpg",
+		"Image enclosure":     "https://example.com/pic.png",
+		"Audio only":          "",
+		"Protocol relative":   "https://example.com/proto.jpg",
+	}
+	for _, a := range arts {
+		if want[a.Title] != a.ImageURL {
+			t.Errorf("%q image = %q, want %q", a.Title, a.ImageURL, want[a.Title])
+		}
+	}
+}

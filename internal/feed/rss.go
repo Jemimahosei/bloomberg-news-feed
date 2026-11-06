@@ -52,15 +52,65 @@ type rssFeed struct {
 	} `xml:"channel"`
 }
 
+type mediaRef struct {
+	URL    string `xml:"url,attr"`
+	Medium string `xml:"medium,attr"`
+	Type   string `xml:"type,attr"`
+}
+
 type rssItem struct {
-	Title       textContent `xml:"title"`
-	Link        textContent `xml:"link"`
-	Description textContent `xml:"description"`
-	PubDate     textContent `xml:"pubDate"`
-	GUID        textContent `xml:"guid"`
-	Enclosure   struct {
-		URL string `xml:"url,attr"`
-	} `xml:"enclosure"`
+	Title          textContent `xml:"title"`
+	Link           textContent `xml:"link"`
+	Description    textContent `xml:"description"`
+	PubDate        textContent `xml:"pubDate"`
+	GUID           textContent `xml:"guid"`
+	Enclosure      mediaRef    `xml:"enclosure"`
+	MediaContent   []mediaRef  `xml:"content"`
+	MediaThumbnail []mediaRef  `xml:"thumbnail"`
+}
+
+// normalizeImageURL keeps only usable http(s) image URLs. Protocol-
+// relative URLs get an https: prefix; anything else is dropped so a
+// malformed feed value can never become a broken or invented image.
+func normalizeImageURL(u string) string {
+	u = strings.TrimSpace(u)
+	if strings.HasPrefix(u, "//") {
+		return "https:" + u
+	}
+	if strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://") {
+		return u
+	}
+	return ""
+}
+
+// pickImage returns the best feed-provided image URL for an item:
+// media:content marked as an image first, then any media:content,
+// then media:thumbnail, then an image enclosure. It only ever returns
+// a URL the feed itself supplied — it never fetches or invents one.
+func pickImage(it rssItem) string {
+	for _, m := range it.MediaContent {
+		if m.Medium == "image" || strings.HasPrefix(strings.ToLower(m.Type), "image/") {
+			if u := normalizeImageURL(m.URL); u != "" {
+				return u
+			}
+		}
+	}
+	for _, m := range it.MediaContent {
+		if u := normalizeImageURL(m.URL); u != "" {
+			return u
+		}
+	}
+	for _, m := range it.MediaThumbnail {
+		if u := normalizeImageURL(m.URL); u != "" {
+			return u
+		}
+	}
+	// Enclosures are often audio (podcasts); only accept image ones
+	// (or an undeclared type, which image enclosures sometimes omit).
+	if t := strings.ToLower(strings.TrimSpace(it.Enclosure.Type)); t == "" || strings.HasPrefix(t, "image/") {
+		return normalizeImageURL(it.Enclosure.URL)
+	}
+	return ""
 }
 
 // textContent collects every character-data chunk inside an element,
@@ -153,7 +203,7 @@ func parseRSS(data []byte, src Source) ([]model.Article, error) {
 			Source:      src.Name,
 			Category:    src.Category,
 			PublishedAt: parsePubDate(string(it.PubDate)),
-			ImageURL:    strings.TrimSpace(it.Enclosure.URL),
+			ImageURL:    pickImage(it),
 		})
 	}
 	return out, nil

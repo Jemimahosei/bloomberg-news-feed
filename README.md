@@ -2,8 +2,8 @@
 
 A full-stack market news aggregator: a Go REST API that ingests free
 public RSS feeds on a schedule, caches responses in Redis, and serves a
-React news terminal — headlines, search, category/source/ticker filters,
-and article detail — from a single service. No API keys, no accounts,
+React news feed — a Featured News story on top and a grid of news cards
+below — from a single service. No API keys, no accounts,
 no third-party Go dependencies (the standard library only; the Redis
 client speaks RESP directly over TCP).
 
@@ -24,9 +24,14 @@ Bloomberg code is copied. Not affiliated with Bloomberg L.P.
 - Caches API responses in Redis when `REDIS_URL`/`REDIS_ADDR` is set and
   falls back to the in-memory store when it is not — the app always
   works, with or without Redis.
-- The React frontend is a dark, terminal-inspired news reader: category
-  tabs, ticker chips (AAPL, MSFT, NVDA, …), full-text search, a source
-  filter, and a two-pane headline/detail view.
+- The React frontend follows the Tech Lab workshop layout verbatim: a
+  Featured News section on top (one featured article — title, image,
+  truncated body) and a News Feed grid below it (reusable news cards
+  with title, image, truncated body). Images come only from the feeds
+  themselves; stories without one get a designed fallback tile. The
+  page keeps the dark terminal styling (near-black background, amber
+  accent, monospace header). The API also still supports headline
+  search and category/source/ticker filters for API clients.
 
 ## Quick start (Docker)
 
@@ -70,6 +75,18 @@ go build -o newsfeed ./cmd/server && ./newsfeed
 curl localhost:8080/healthz
 # {"articles":286,"status":"ok","updated_at":"2026-11-06T03:21:09Z"}
 ```
+
+### Workshop endpoints (what the frontend uses)
+
+```bash
+curl "localhost:8080/api/news/get-featured-article"
+curl "localhost:8080/api/news/get-newsfeed?limit=50"
+```
+
+`get-featured-article` returns the single newest article as
+`{"data": {...}}`; `get-newsfeed` returns the newest-first list as
+`{"data": [...], "count": N}`. Articles carry an `image_url` when the
+RSS feed supplied one (omitted otherwise).
 
 ### Latest headlines
 

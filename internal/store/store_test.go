@@ -25,6 +25,17 @@ func seedStore() *Store {
 	return s
 }
 
+func TestFeatured(t *testing.T) {
+	s := seedStore()
+	a, ok := s.Featured()
+	if !ok || a.ID != "a1" {
+		t.Fatalf("featured = %+v %v, want a1 (newest)", a, ok)
+	}
+	if _, ok := New().Featured(); ok {
+		t.Errorf("empty store Featured should report false")
+	}
+}
+
 func TestListFiltersAndOrder(t *testing.T) {
 	s := seedStore()
 	all := s.List("", "", 0)

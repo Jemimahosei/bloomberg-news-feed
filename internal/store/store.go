@@ -62,6 +62,18 @@ func (s *Store) sorted() []model.Article {
 	return out
 }
 
+// Featured returns the newest article — the single featured story for
+// the workshop's Featured News section. It reports false when empty.
+func (s *Store) Featured() (model.Article, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sorted := s.sorted()
+	if len(sorted) == 0 {
+		return model.Article{}, false
+	}
+	return sorted[0], true
+}
+
 // List returns newest-first articles filtered by category and/or source.
 // Empty filters match everything. limit <= 0 means no limit.
 func (s *Store) List(category, source string, limit int) []model.Article {

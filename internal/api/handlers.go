@@ -141,6 +141,29 @@ func (s *Server) ArticleDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// FeaturedArticle returns the single featured article (the newest one),
+// per the workshop spec: GET /api/news/get-featured-article
+func (s *Server) FeaturedArticle(w http.ResponseWriter, r *http.Request) {
+	s.cached(w, r, "news:featured", func() (any, int) {
+		a, ok := s.Store.Featured()
+		if !ok {
+			return map[string]string{"error": "no articles available"}, http.StatusNotFound
+		}
+		return map[string]any{"data": a}, http.StatusOK
+	})
+}
+
+// Newsfeed returns the article list for the workshop's News Feed grid:
+// GET /api/news/get-newsfeed?limit=50
+func (s *Server) Newsfeed(w http.ResponseWriter, r *http.Request) {
+	limit := parseLimit(r, 50, 100)
+	key := "news:newsfeed&limit=" + strconv.Itoa(limit)
+	s.cached(w, r, key, func() (any, int) {
+		arts := s.Store.List("", "", limit)
+		return listResponse{Data: arts, Count: len(arts)}, http.StatusOK
+	})
+}
+
 // Categories lists the distinct categories currently present.
 func (s *Server) Categories(w http.ResponseWriter, r *http.Request) {
 	cats := s.Store.Categories()
@@ -181,6 +204,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/headlines", s.Headlines)
 	mux.HandleFunc("GET /api/search", s.Search)
 	mux.HandleFunc("GET /api/articles/{id}", s.ArticleDetail)
+	mux.HandleFunc("GET /api/news/get-featured-article", s.FeaturedArticle)
+	mux.HandleFunc("GET /api/news/get-newsfeed", s.Newsfeed)
 	mux.HandleFunc("GET /api/categories", s.Categories)
 	mux.HandleFunc("GET /api/sources", s.Sources)
 	return mux

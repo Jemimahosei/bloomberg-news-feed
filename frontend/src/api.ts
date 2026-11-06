@@ -14,11 +14,6 @@ interface ListResponse {
   count: number
 }
 
-interface StringsResponse {
-  data: string[]
-  count: number
-}
-
 interface HealthResponse {
   status: string
   articles: number
@@ -33,39 +28,17 @@ async function getJSON<T>(path: string): Promise<T> {
   return (await res.json()) as T
 }
 
-export interface HeadlineFilters {
-  category?: string
-  source?: string
-  ticker?: string
-  limit?: number
-}
-
-export function fetchHeadlines(f: HeadlineFilters): Promise<ListResponse> {
-  const p = new URLSearchParams()
-  if (f.category) p.set('category', f.category)
-  if (f.source) p.set('source', f.source)
-  if (f.ticker) p.set('ticker', f.ticker)
-  p.set('limit', String(f.limit ?? 50))
-  return getJSON<ListResponse>(`/api/headlines?${p.toString()}`)
-}
-
-export function searchArticles(q: string, limit = 50): Promise<ListResponse> {
-  const p = new URLSearchParams({ q, limit: String(limit) })
-  return getJSON<ListResponse>(`/api/search?${p.toString()}`)
-}
-
-export function fetchArticle(id: string): Promise<Article> {
-  return getJSON<{ data: Article }>(`/api/articles/${encodeURIComponent(id)}`).then(
+/** Workshop Part 1+4: the single featured article. */
+export function fetchFeaturedArticle(): Promise<Article> {
+  return getJSON<{ data: Article }>('/api/news/get-featured-article').then(
     (r) => r.data,
   )
 }
 
-export function fetchCategories(): Promise<string[]> {
-  return getJSON<StringsResponse>('/api/categories').then((r) => r.data)
-}
-
-export function fetchSources(): Promise<string[]> {
-  return getJSON<StringsResponse>('/api/sources').then((r) => r.data)
+/** Workshop Part 3+4: the article list for the News Feed grid. */
+export function fetchNewsfeed(limit = 50): Promise<ListResponse> {
+  const p = new URLSearchParams({ limit: String(limit) })
+  return getJSON<ListResponse>(`/api/news/get-newsfeed?${p.toString()}`)
 }
 
 export function fetchHealth(): Promise<HealthResponse> {
