@@ -1,0 +1,30 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # The api service serves BOTH the JSON API and the React frontend from
+  # :8080 (the frontend is embedded in the Go binary at build time).
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      REDIS_ADDR: "redis:6379"
+      CACHE_TTL_SECONDS: "60"
+      INGEST_INTERVAL_MINUTES: "15"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

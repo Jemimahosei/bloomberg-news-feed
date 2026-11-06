@@ -1,0 +1,23 @@
+# Render Blueprint for the Newsfeed: one free Docker web service that serves
+# both the Go API and the React frontend from a single port.
+# Deploy: create a Blueprint in the Render dashboard from this repo, or
+# `render blueprint launch` — the service builds from the Dockerfile.
+# REDIS_URL is optional: leave it unset and the app runs on its in-memory
+# store. To enable Redis caching, create a free Render Key Value instance
+# and paste its internal Redis URL into the REDIS_URL row in the dashboard.
+# Note: Render free web services sleep after inactivity, so the first load
+# after idle can take ~50s.
+services:
+  - type: web
+    name: bloomberg-news-feed
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "60"
+      - key: INGEST_INTERVAL_MINUTES
+        value: "15"

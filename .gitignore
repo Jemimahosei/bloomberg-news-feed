@@ -1,0 +1,6 @@
+/newsfeed
+*.log
+frontend/node_modules
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+cmd/server/dist/assets
