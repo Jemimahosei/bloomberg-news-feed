@@ -1,43 +1,34 @@
-import type { Article } from '../api'
-import { formatDateTime, timeAgo } from '../api'
-import ArticleImage from './ArticleImage'
+import Link from "next/link";
+import { Article } from "@/utils/types";
 
-function categoryLabel(c: string): string {
-  return c.charAt(0).toUpperCase() + c.slice(1)
+interface NewsCardProps {
+    article: Article;
 }
 
-/**
- * Workshop Part 1: ONE featured news article at the top of the page —
- * the article's title, its image, and a portion of the body truncated
- * to fit nicely in the section.
- */
-export default function FeaturedNews({ article }: { article: Article }) {
-  return (
-    <section className="featured" aria-label="Featured news">
-      <p className="section-label">Featured News</p>
-      <article className="featured-card">
-        <ArticleImage article={article} className="featured-image" />
-        <div className="featured-body">
-          <div className="headline-top">
-            <span className="category-tag">{categoryLabel(article.category)}</span>
-            <span className="headline-source">{article.source}</span>
-            <span className="headline-time">{timeAgo(article.published_at)}</span>
-          </div>
-          <h2>{article.title}</h2>
-          {article.description && (
-            <p className="featured-text">{article.description}</p>
-          )}
-          <p className="detail-date">{formatDateTime(article.published_at)}</p>
-          <a
-            className="read-full"
-            href={article.url}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Read the full article on {article.source} ↗
-          </a>
+
+function FeaturedNewsCard({ article }: NewsCardProps) {
+    return (
+        <div className="featured-news-card">
+            <div className="featured-news-img-div">
+                <img
+                    src={article.image_url}
+                    alt={article.title}
+                    className="featured-news-img"
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                />
+            </div>
+            <div className="featured-news-info">
+                <h2 className="featured-story-title">{article.title}</h2>
+                <p className="featured-story-summary">{article.body}</p>
+                {article.author && <span className="featured-story-author">By {article.author}</span>}
+                {article.url &&
+                    <span className="featured-story-author" >
+                        Via <Link className="origin-link" href={article.url} target="_blank">{article.url}</Link>
+                    </span>
+                }
+            </div>
         </div>
-      </article>
-    </section>
-  )
+    );
 }
+
+export default FeaturedNewsCard;
