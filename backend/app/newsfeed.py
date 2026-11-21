@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlparse
 
 from app.utils.redis import REDIS_CLIENT
 
@@ -40,12 +41,31 @@ def get_featured_news() -> Article | None:
     return max(all_news, key=lambda article: article.publish_date)
 
 
+def _rewrite_image_url(url: str) -> str:
+    """Rewrite an fm.cnbc.com image URL to its image.cnbcfm.com form.
+
+    Plain requests to fm.cnbc.com images return 403; the same image is
+    served from image.cnbcfm.com/api/v1/image/<basename> (the target of
+    the 301 a browser User-Agent receives). Any other URL is returned
+    unchanged.
+    """
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.netloc.lower() != "fm.cnbc.com":
+        return url
+    basename = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    if not basename:
+        return url
+    return f"https://image.cnbcfm.com/api/v1/image/{basename}"
+
+
 def _format_as_article(data: dict) -> Article:
     return Article(
         author=data["author"],
         title=data["title"],
         body=data["text"],
         publish_date=datetime.fromisoformat(data["published"]),
-        image_url=data["thread"]["main_image"],
+        image_url=_rewrite_image_url(data["thread"]["main_image"]),
         url=data["url"],
     )

@@ -4,19 +4,7 @@ import { useState, useEffect } from "react";
 
 import { Article } from "@/utils/types";
 
-
-// DUMMY DATA
-import * as featureStoryJson from "../../public/test-data/test_feature.json";
 import FeaturedNewsCard from "@/components/FeaturedNews";
-
-let mainStory: Article = {
-    title: featureStoryJson.thread.title,
-    image_url: featureStoryJson.thread.main_image,
-    body: featureStoryJson.text,
-    author: featureStoryJson.author,                 // story author
-    url: featureStoryJson.url,                       // story url
-    publish_date: new Date(featureStoryJson.published)    // story publish date
-}
 
 export default function News() {
     const [articles, setArticles] = useState<Article[]>([]);
@@ -49,7 +37,19 @@ export default function News() {
         <div>
             <div className="grid grid-cols-4 space-x-2 space-y-2 pt-2">
                 <div className="col-span-4 lg:col-span-3">
-                    <FeaturedNewsCard article={featuredArticle ?? mainStory} />
+                    <h2 className="featured-news-heading">Featured News</h2>
+                    {featuredArticle ? (
+                        <FeaturedNewsCard article={featuredArticle} />
+                    ) : (
+                        <div className="featured-news-card" aria-busy="true">
+                            <div className="featured-news-img-div">
+                                <div className="featured-news-img animate-pulse bg-slate-200" />
+                            </div>
+                            <div className="featured-news-info">
+                                <p className="text-body">Loading featured story…</p>
+                            </div>
+                        </div>
+                    )}
                     <NewsFeed articles={articles} />
                 </div>
                 <div className="hidden lg:block col-span-1 overflow-hidden border-l border-slate-300">

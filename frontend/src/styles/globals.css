@@ -152,6 +152,31 @@ h2.instruction {
 .instruction {
   @apply text-2xl flex justify-center p-5
 }
+
+.featured-news-heading {
+  font-family: "PT Serif", serif;
+  @apply text-3xl font-bold text-title pb-2 mb-4 border-b border-slate-300;
+}
+
+/* Fallback tile shown when an article image fails to load.
+   Same size as the image slot; never a fake photo. */
+.featured-fallback {
+  @apply flex items-center justify-center bg-slate-200;
+}
+
+.featured-fallback-initial {
+  font-family: "PT Serif", serif;
+  @apply text-7xl font-bold text-slate-400;
+}
+
+.news-fallback {
+  @apply flex items-center justify-center bg-slate-200;
+}
+
+.news-fallback-initial {
+  font-family: "PT Serif", serif;
+  @apply text-5xl font-bold text-slate-400;
+}
 /* END OF TECH LAB STYLES */
 
 body {
