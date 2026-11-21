@@ -1,23 +1,24 @@
-import type { Article } from '../api'
-import NewsCard from './NewsCard'
+import React from 'react';
+import { Article } from '@/utils/types';
+import NewsCard from './NewsCard';
 
-/**
- * Workshop Part 3: a News Feed populating a GRID of NewsCards at the
- * bottom of the page, under the Featured News section.
- */
-export default function NewsFeed({ articles }: { articles: Article[] }) {
-  return (
-    <section className="newsfeed-section" aria-label="News feed">
-      <p className="section-label">News Feed</p>
-      {articles.length === 0 ? (
-        <div className="status">No headlines right now. Check back soon.</div>
-      ) : (
-        <div className="news-grid">
-          {articles.map((a) => (
-            <NewsCard key={a.id} article={a} />
-          ))}
-        </div>
-      )}
-    </section>
-  )
+interface NewsFeedProps {
+    articles: Article[];
 }
+
+function NewsFeed({ articles }: NewsFeedProps ) {
+    return (
+        <div className="stories-container">
+            <div className="stories-grid">
+                {articles.map((article, i) => (
+                    <NewsCard
+                        key={`${article}_${i}`}
+                        article={article}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+};
+
+export default NewsFeed;

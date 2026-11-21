@@ -1,39 +1,36 @@
-import type { Article } from '../api'
-import { timeAgo } from '../api'
-import ArticleImage from './ArticleImage'
+import Link from "next/link";
+import { Article } from "@/utils/types";
 
-function categoryLabel(c: string): string {
-  return c.charAt(0).toUpperCase() + c.slice(1)
+interface NewsCardProps {
+    article: Article;
 }
 
-/**
- * Workshop Part 2: a reusable news card for general stories — the
- * article's title, its image, and a truncated version of the body.
- * Reusable so it populates every story in the feed.
- */
-export default function NewsCard({ article }: { article: Article }) {
-  return (
-    <article className="news-card">
-      <a
-        href={article.url}
-        target="_blank"
-        rel="noreferrer"
-        className="news-card-link"
-        aria-label={article.title}
-      >
-        <ArticleImage article={article} className="news-card-image" />
-        <div className="news-card-body">
-          <div className="headline-top">
-            <span className="category-tag">{categoryLabel(article.category)}</span>
-            <span className="headline-source">{article.source}</span>
-            <span className="headline-time">{timeAgo(article.published_at)}</span>
-          </div>
-          <h3>{article.title}</h3>
-          {article.description && (
-            <p className="news-card-text">{article.description}</p>
-          )}
+
+function NewsCard({ article }: NewsCardProps) {
+    return (
+        <div className="news-card">
+            <div className="news-info">
+                <div className="news-img-div min-h-[3rem] w-full">
+                    <img
+                        src={article.image_url}
+                        alt={article.title}
+                        className="news-img"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                </div>
+                <div className="pt-4 w-full min-w-0">
+                    <h2 className="story-title">{article.title}</h2>
+                    <p className="story-summary">{article.body}</p>
+                    {article.author && <span className="story-author">By {article.author}</span>}
+                    {article.url &&
+                        <span className="story-author" >
+                            <Link className="origin-link" href={article.url} target="_blank">View Story</Link>
+                        </span>
+                    }
+                </div>
+            </div>
         </div>
-      </a>
-    </article>
-  )
+    );
 }
+
+export default NewsCard;

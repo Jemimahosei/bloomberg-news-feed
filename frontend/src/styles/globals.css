@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Merriweather:ital,wght@0,300;0,400;0,700;0,900;1,300;1,400;1,700;1,900&family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&family=Roboto:ital,wght@0,100..900;1,100..900&display=swap');
+@layer components {
+
+  .menu-item {
+    @apply block leading-relaxed tracking-wider py-2 px-3 rounded hover:text-primary md:border-0;
+  }
+
+}
+
+/*
+If you're curious about the specific styling framework we're using for this project,
+ check out https://tailwindcss.com/docs/installation/using-vite
+
+There are plenty of different styling frameworks to use, and we encourage you to explore others.
+ */
+
+
+/* Tech Lab Specific Styles */
+
+/* Featured News */
+.featured-news-card {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-4
+}
+
+.featured-news-img-div {
+  @apply p-4 flex items-center min-w-0 bg-slate-100
+}
+
+.featured-news-img {
+  @apply object-cover w-full h-72
+}
+
+.featured-news-info {
+  @apply p-3 h-full w-full min-w-0 flex flex-col items-start
+}
+
+.featured-story-title {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  font-weight: bold;
+  text-align: center;
+  font-family: "PT Serif", serif;
+  overflow: hidden;
+  max-width: 100%;
+  line-height: 1.2;
+  @apply text-title text-left line-clamp-4;
+}
+
+.featured-story-summary {
+  overflow: hidden;
+  @apply line-clamp-[8] text-body
+}
+.featured-story-author {
+  @apply justify-self-end self-end place-self-end
+}
+
+/* Other Stories */
+
+.stories-container{
+  @apply divide-slate-300 border-t;
+}
+
+.stories-grid {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:divide-x space-y-2 divide-slate-300 pb-2
+}
+
+.stories-grid > *:first-child {
+  @apply pt-3;
+}
+
+.news-card {
+  @apply p-1 col-span-1 min-w-0
+}
+
+.news-img-div {
+  @apply flex items-center min-w-0 bg-slate-100
+}
+
+.news-img {
+  @apply object-cover w-full h-48
+}
+
+.news-info {
+  @apply p-4 h-full w-full min-w-0 flex flex-col items-start  border-slate-300
+}
+
+.story-title {
+  font-weight: bold;
+  text-align: center;
+  font-family: "PT Serif", serif;
+  overflow: hidden;
+  max-width: 100%;
+  line-height: 1.25;
+  @apply text-title text-left text-2xl pb-2 line-clamp-3;
+}
+
+.story-summary {
+  overflow: hidden;
+  @apply line-clamp-4 text-body
+}
+
+.story-author {
+  @apply pt-1 justify-self-end self-end place-self-end text-sm ;
+}
+
+/* NEWS */
+.nav-div {
+  @apply bg-primary w-full flex flex-wrap flex-col gap-4 items-center justify-between mx-auto pt-8 dark:bg-[color:--nav-color]
+}
+
+.navbar-navigation-wrapper {
+  font-family: "Inter", sans-serif;
+  @apply bg-secondary text-secondaryBackground w-full py-2 border-y border-gray-700 md:block md:w-auto
+}
+
+.navbar-list-wrapper {
+  @apply flex flex-col justify-center items-center;
+}
+
+.navbar-list {
+  @apply font-medium flex flex-row flex-wrap justify-center items-center p-2 md:p-0 gap-x-4 md:gap-x-8;
+}
+
+.navbar-navigation-buttons {
+  @apply font-bold flex flex-col p-4 md:p-0 mt-4 border border-gray-100 rounded-lg md:flex-row md:space-x-8 rtl:space-x-reverse md:mt-0 md:border-0 md:bg-white  md:dark:bg-[color:--nav-color] dark:border-gray-700
+}
+
+#navbar-home-span-wrapper {
+  @apply flex items-center space-x-3 rtl:space-x-reverse
+}
+
+#navbar-home-span {
+  @apply self-center text-4xl sm:text-5xl md:text-6xl font-light tracking-tighter whitespace-nowrap
+}
+
+.origin-link {
+  @apply text-blue-400
+}
+
+#nav-divider {
+  @apply text-2xl
+}
+
+h2.instruction {
+  @apply text-3xl font-bold flex justify-center p-5
+}
+
+.instruction {
+  @apply text-2xl flex justify-center p-5
+}
+/* END OF TECH LAB STYLES */
+
+body {
+  font-family: "Inter", sans-serif;
+  @apply bg-background
+}
+
+/* Keep the author and the story link apart on one line. */
+.story-author + .story-author {
+  margin-left: 0.75rem;
+}
