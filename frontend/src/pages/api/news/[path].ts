@@ -1,7 +1,9 @@
 import { NextApiRequest, NextApiResponse } from 'next';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-    const url = `${process.env.BACKEND_API_URL}/${req.query.path}`;
+    // Forward any query string (e.g. ?symbols=AAPL) to the backend.
+    const queryString = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    const url = `${process.env.BACKEND_API_URL}/${req.query.path}${queryString}`;
 
     if (req.method === 'GET') {
         // Handle GET request

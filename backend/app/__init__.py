@@ -3,9 +3,9 @@
 import os
 from dataclasses import asdict
 
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 
-from app import newsfeed
+from app import newsfeed, stocks
 from app.utils.file_loader import load_json_files
 from app.utils.redis import REDIS_CLIENT
 
@@ -40,5 +40,17 @@ def create_app():
         """Flask route to get the featured article from datastore."""
         article = newsfeed.get_featured_news()
         return jsonify(_to_json(article) if article else None)
+
+    @app.route("/get-stocks", methods=["GET"])
+    def get_stocks_route() -> Response:
+        """Flask route to get stock quotes.
+
+        No query param serves the default watchlist; ?symbols=AAPL,MSFT
+        looks up the given tickers.
+        """
+        raw = request.args.get("symbols")
+        symbols = stocks.clean_symbols(raw) if raw is not None else None
+        quotes = stocks.get_stocks(symbols)
+        return jsonify([stocks.quote_to_dict(quote) for quote in quotes])
 
     return app

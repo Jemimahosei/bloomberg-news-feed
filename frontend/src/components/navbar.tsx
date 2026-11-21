@@ -20,21 +20,6 @@ export default function Navbar() {
                             <li>
                                 <Link href='/stocks'><span className="menu-item">Stocks</span></Link>
                             </li>
-                            <li>
-                                <p id='nav-divider'>|</p>
-                            </li>
-                            <li>
-                                <Link href='https://github.com/Jemimahosei/bloomberg-news-feed' target="_blank"><span className="menu-item">Github</span></Link>
-                            </li>
-                            <li>
-                                <Link href='https://bloombergtechlab.github.io/bbit-learning-labs/' target="_blank"><span className="menu-item">Documentation</span></Link>
-                            </li>
-                            <li>
-                                <Link href='https://redis.io/docs/' target="_blank"><span className="menu-item">Redis</span></Link>
-                            </li>
-                            <li>
-                                <Link href='https://bloombergtechlab.github.io/bbit-learning-labs/frontend/' target="_blank"><span className="menu-item">Stretch Goals</span></Link>
-                            </li>
                         </ul>
                     </div>
                 </div>
