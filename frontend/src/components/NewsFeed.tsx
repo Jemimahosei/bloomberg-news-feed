@@ -2,18 +2,25 @@ import React from 'react';
 import { Article } from '@/utils/types';
 import NewsCard from './NewsCard';
 
-interface NewsFeedProps {
-    articles: Article[];
+export interface ArticleItem {
+    article: Article;
+    // Position in the full newsfeed list; the article page lives at /news/{index}.
+    index: number;
 }
 
-function NewsFeed({ articles }: NewsFeedProps ) {
+interface NewsFeedProps {
+    items: ArticleItem[];
+}
+
+function NewsFeed({ items }: NewsFeedProps ) {
     return (
         <div className="stories-container">
             <div className="stories-grid">
-                {articles.map((article, i) => (
+                {items.map(({ article, index }) => (
                     <NewsCard
-                        key={`${article}_${i}`}
+                        key={`${article.url}_${index}`}
                         article={article}
+                        index={index}
                     />
                 ))}
             </div>

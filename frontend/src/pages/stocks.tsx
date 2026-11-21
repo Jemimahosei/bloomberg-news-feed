@@ -1,6 +1,7 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useCallback, FormEvent } from "react";
 
-import { Quote } from "@/utils/types";
+import { Quote, HistoryResponse } from "@/utils/types";
+import StockChart from "@/components/StockChart";
 
 const TICKER_RE = /^[A-Z0-9.\-]{1,12}$/;
 
@@ -28,9 +29,13 @@ function changeClass(value: number | null): string {
     return value > 0 ? "text-green-600" : "text-red-600";
 }
 
-function QuoteRow({ quote }: { quote: Quote }) {
+function QuoteRow({ quote, selected, onSelect }: { quote: Quote; selected: boolean; onSelect: () => void }) {
     return (
-        <tr className="border-b border-slate-300">
+        <tr
+            className={`border-b border-slate-300 cursor-pointer hover:bg-slate-50 ${selected ? "bg-slate-100" : ""}`}
+            onClick={onSelect}
+            title={`Show ${quote.symbol} price chart`}
+        >
             <td className="py-3 pr-4">
                 <div className="font-bold text-title">{quote.symbol}</div>
                 {quote.name && <div className="text-sm text-body">{quote.name}</div>}
@@ -53,6 +58,24 @@ export default function Stocks() {
     const [searching, setSearching] = useState(false);
     const [searchMessage, setSearchMessage] = useState<string | null>(null);
     const [searchResult, setSearchResult] = useState<Quote | null>(null);
+    const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+    const [history, setHistory] = useState<HistoryResponse | null>(null);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
+
+    // Plain quote fetch used by the initial load and the auto-refresh.
+    // It only updates the quotes; loading and search state are untouched
+    // so a background refresh never flashes the page.
+    const fetchQuotes = useCallback(async (): Promise<Quote[] | null> => {
+        const response = await fetch('/api/news/get-stocks', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+    }, []);
 
     const loadWatchlist = async () => {
         setLoading(true);
@@ -60,15 +83,8 @@ export default function Stocks() {
         setSearchResult(null);
         setSearchMessage(null);
         try {
-            const response = await fetch('/api/news/get-stocks', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-            });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const data = await response.json();
-            setQuotes(data);
+            const data = await fetchQuotes();
+            setQuotes(data ?? []);
         } catch {
             setLoadError("Stock data is unavailable right now. Please try again later.");
         } finally {
@@ -79,6 +95,62 @@ export default function Stocks() {
     useEffect(() => {
         loadWatchlist();
     }, []);
+
+    // Auto-refresh: re-fetch the quotes every 60 seconds so the page
+    // stays current (and the "as of" line moves) without a manual
+    // reload. Skipped while the tab is hidden. The backend caches
+    // quotes for 120 seconds, so a refresh inside that window is cheap.
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (document.hidden) return;
+            fetchQuotes()
+                .then((data) => {
+                    if (data) setQuotes(data);
+                })
+                .catch(() => {
+                    // Keep showing the last good quotes; the next
+                    // refresh tries again.
+                });
+        }, 60000);
+        return () => clearInterval(timer);
+    }, [fetchQuotes]);
+
+    // Default the chart to the first watchlist ticker once quotes load.
+    useEffect(() => {
+        if (selectedSymbol === null && quotes.length > 0) {
+            setSelectedSymbol(quotes[0].symbol);
+        }
+    }, [quotes, selectedSymbol]);
+
+    // Load the price history whenever the selected ticker changes.
+    useEffect(() => {
+        if (!selectedSymbol) return;
+        setHistoryLoading(true);
+        setHistoryError(null);
+        setHistory(null);
+        fetch(`/api/news/get-history?symbol=${encodeURIComponent(selectedSymbol)}`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        })
+            .then((response) => response.json())
+            .then((data: HistoryResponse) => {
+                if (data.error === "not_found") {
+                    setHistoryError(`No price history found for ${selectedSymbol}.`);
+                } else if (data.error === "unavailable" || !data.points || data.points.length === 0) {
+                    setHistoryError("Price history is unavailable right now.");
+                } else {
+                    setHistory(data);
+                }
+            })
+            .catch(() => {
+                setHistoryError("Price history is unavailable right now.");
+            })
+            .finally(() => {
+                setHistoryLoading(false);
+            });
+    }, [selectedSymbol]);
 
     const onSearch = async (event: FormEvent) => {
         event.preventDefault();
@@ -181,11 +253,29 @@ export default function Stocks() {
                             </thead>
                             <tbody>
                                 {displayed.map((quote) => (
-                                    <QuoteRow key={quote.symbol} quote={quote} />
+                                    <QuoteRow
+                                        key={quote.symbol}
+                                        quote={quote}
+                                        selected={quote.symbol === selectedSymbol}
+                                        onSelect={() => setSelectedSymbol(quote.symbol)}
+                                    />
                                 ))}
                             </tbody>
                         </table>
                     </div>
+                    <p className="pt-2 text-sm text-body">Select a row to see its price chart.</p>
+                    {selectedSymbol && (
+                        <div className="pt-4">
+                            <h3 className="stock-chart-heading">{selectedSymbol} — Price history</h3>
+                            {historyLoading ? (
+                                <p className="text-body" aria-busy="true">Loading chart…</p>
+                            ) : historyError ? (
+                                <p className="text-body">{historyError}</p>
+                            ) : history ? (
+                                <StockChart points={history.points} label={history.label} />
+                            ) : null}
+                        </div>
+                    )}
                     <p className="pt-4 text-sm text-body">
                         Quotes from Yahoo Finance and Nasdaq. Prices show the last close when markets are closed.
                     </p>

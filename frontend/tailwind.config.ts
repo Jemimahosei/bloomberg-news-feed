@@ -17,6 +17,7 @@ export default {
         primary: '#FFA028',
         secondary: '#1C1C1C',
         highlight: '#FFA028',
+        ink: '#111111',
       },
     },
   },

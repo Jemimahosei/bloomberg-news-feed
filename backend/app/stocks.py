@@ -271,6 +271,34 @@ def _save_cached(symbols: list[str], quotes: list[Quote]) -> None:
         pass
 
 
+def _fill_day_range(quotes: list[Quote]) -> list[Quote]:
+    """Fill missing day high/low from the most recent daily candle.
+
+    Quotes that came from Nasdaq carry no day range. For those, the
+    high/low of the most recent trading day's candle comes from the
+    Yahoo history (the last daily candle). If that history is
+    unavailable, the values stay None and the page shows dashes —
+    never invented.
+    """
+    missing = [q for q in quotes if q.day_high is None or q.day_low is None]
+    if not missing:
+        return quotes
+
+    def _fill(quote: Quote) -> Quote:
+        history = get_history(quote.symbol)
+        if history.error or (history.day_high is None and history.day_low is None):
+            return quote
+        if quote.day_high is None:
+            quote.day_high = history.day_high
+        if quote.day_low is None:
+            quote.day_low = history.day_low
+        return quote
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        list(executor.map(_fill, missing))
+    return quotes
+
+
 def get_stocks(symbols: Optional[list[str]] = None) -> list[Quote]:
     """Get stock quotes for the given symbols, or the default watchlist.
 
@@ -286,5 +314,235 @@ def get_stocks(symbols: Optional[list[str]] = None) -> list[Quote]:
         return cached
     with ThreadPoolExecutor(max_workers=5) as executor:
         quotes = list(executor.map(_fetch_quote, symbols))
+    quotes = _fill_day_range(quotes)
     _save_cached(symbols, quotes)
     return quotes
+
+
+YAHOO_HISTORY_URL = (
+    "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1mo&interval=1d"
+)
+NASDAQ_CHART_URL = "https://api.nasdaq.com/api/quote/{symbol}/chart?assetclass=stocks"
+_HISTORY_CACHE_TTL_SECONDS = 900
+_MAX_HISTORY_POINTS = 120
+
+
+@dataclass
+class HistoryPoint:
+    """One price point in a price history series."""
+
+    date: str  # ISO date, e.g. "2026-11-20" (or a datetime for intraday)
+    close: float
+    high: Optional[float] = None  # day's candle high (daily bars only)
+    low: Optional[float] = None  # day's candle low (daily bars only)
+
+
+@dataclass
+class History:
+    """A price history series for one symbol."""
+
+    symbol: str
+    source: Optional[str]  # "yahoo" | "nasdaq" | None
+    label: str  # human range label, e.g. "Past month"
+    points: list[HistoryPoint]
+    error: Optional[str] = None
+    # Most recent trading day's range. For Yahoo this is the last daily
+    # candle's high/low; for Nasdaq it is the session's traded max/min
+    # (both real data, never invented).
+    day_high: Optional[float] = None
+    day_low: Optional[float] = None
+
+
+def history_to_dict(history: History) -> dict[str, Any]:
+    """Convert a history to a JSON friendly dict."""
+    return {
+        "symbol": history.symbol,
+        "source": history.source,
+        "label": history.label,
+        "points": [asdict(point) for point in history.points],
+        "error": history.error,
+        "day_high": history.day_high,
+        "day_low": history.day_low,
+    }
+
+
+def _history_from_dict(data: dict[str, Any]) -> History:
+    """Rebuild a history from a cached dict."""
+    return History(
+        symbol=data["symbol"],
+        source=data.get("source"),
+        label=data.get("label", ""),
+        points=[
+            HistoryPoint(p["date"], p["close"], p.get("high"), p.get("low"))
+            for p in data.get("points", [])
+        ],
+        error=data.get("error"),
+        day_high=data.get("day_high"),
+        day_low=data.get("day_low"),
+    )
+
+
+def _history_points_from_yahoo(result: dict[str, Any]) -> list[HistoryPoint]:
+    """Parse Yahoo chart timestamps + OHLC into history points.
+
+    Null closes (market holidays, partial days) are skipped. The high
+    and low of each daily candle are kept so the most recent trading
+    day's range can fill in a quote that has none.
+    """
+    timestamps = result.get("timestamp") or []
+    indicators = result.get("indicators", {}).get("quote") or []
+    quote = indicators[0] if indicators else {}
+    closes = quote.get("close") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+    points: list[HistoryPoint] = []
+    for i, (timestamp, close) in enumerate(zip(timestamps, closes)):
+        if close is None:
+            continue
+        date = datetime.fromtimestamp(timestamp, tz=timezone.utc).date().isoformat()
+        high = highs[i] if i < len(highs) else None
+        low = lows[i] if i < len(lows) else None
+        points.append(
+            HistoryPoint(
+                date=date,
+                close=float(close),
+                high=float(high) if high is not None else None,
+                low=float(low) if low is not None else None,
+            )
+        )
+    return points
+
+
+def _fetch_history_yahoo(symbol: str) -> History:
+    """Fetch a month of daily closes from the Yahoo Finance chart API.
+
+    No API key is needed; a browser User-Agent is required. An unknown
+    symbol returns error "not_found"; any other failure returns error
+    "unavailable".
+    """
+    url = YAHOO_HISTORY_URL.format(symbol=symbol)
+    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        logger.warning("Yahoo history fetch failed for %s: HTTP %s", symbol, e.code)
+        error = "not_found" if e.code == 404 else "unavailable"
+        return History(symbol, None, "", [], error)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        logger.warning("Yahoo history fetch failed for %s: %s", symbol, type(e).__name__)
+        return History(symbol, None, "", [], "unavailable")
+    chart = payload.get("chart", {})
+    if chart.get("error") is not None:
+        return History(symbol, None, "", [], "not_found")
+    result = chart.get("result") or []
+    if not result:
+        return History(symbol, None, "", [], "not_found")
+    points = _history_points_from_yahoo(result[0])
+    if not points:
+        return History(symbol, None, "", [], "not_found")
+    last = points[-1]
+    return History(
+        symbol, "yahoo", "Past month", points, day_high=last.high, day_low=last.low
+    )
+
+
+def _history_points_from_nasdaq(chart: list[dict[str, Any]]) -> list[HistoryPoint]:
+    """Parse Nasdaq intraday chart points into history points.
+
+    Nasdaq returns minute bars for the current session; points are
+    downsampled to at most _MAX_HISTORY_POINTS so the chart stays
+    readable, keeping the first and last point.
+    """
+    raw: list[HistoryPoint] = []
+    for item in chart or []:
+        try:
+            timestamp = int(item.get("x", 0)) // 1000
+            close = float(item.get("y"))
+        except (TypeError, ValueError):
+            continue
+        date = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+        raw.append(HistoryPoint(date=date, close=close))
+    if len(raw) <= _MAX_HISTORY_POINTS:
+        return raw
+    step = len(raw) / _MAX_HISTORY_POINTS
+    sampled = [raw[int(i * step)] for i in range(_MAX_HISTORY_POINTS)]
+    if sampled[-1] is not raw[-1]:
+        sampled.append(raw[-1])
+    return sampled
+
+
+def _fetch_history_nasdaq(symbol: str) -> History:
+    """Fetch the current session's price points from the Nasdaq chart API.
+
+    No API key is needed. An unknown symbol (data null) returns error
+    "not_found"; any other failure returns error "unavailable".
+    """
+    url = NASDAQ_CHART_URL.format(symbol=symbol)
+    request = urllib.request.Request(
+        url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        logger.warning("Nasdaq history fetch failed for %s: HTTP %s", symbol, e.code)
+        error = "not_found" if e.code == 404 else "unavailable"
+        return History(symbol, None, "", [], error)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        logger.warning("Nasdaq history fetch failed for %s: %s", symbol, type(e).__name__)
+        return History(symbol, None, "", [], "unavailable")
+    data = payload.get("data") or {}
+    chart = data.get("chart") or []
+    if not chart:
+        message = json.dumps(payload.get("status") or {})
+        error = "not_found" if "not exists" in message.lower() else "unavailable"
+        return History(symbol, None, "", [], error)
+    points = _history_points_from_nasdaq(chart)
+    if not points:
+        return History(symbol, None, "", [], "unavailable")
+    closes = [point.close for point in points]
+    return History(
+        symbol,
+        "nasdaq",
+        "Today's session",
+        points,
+        day_high=max(closes),
+        day_low=min(closes),
+    )
+
+
+def _history_cache_key(symbol: str) -> str:
+    """Build the Redis cache key for a symbol's history."""
+    return "history:" + symbol
+
+
+def get_history(symbol: str) -> History:
+    """Get a price history for one symbol, Yahoo first, Nasdaq fallback.
+
+    Yahoo serves a month of daily closes. Only when Yahoo fails with
+    "unavailable" is Nasdaq tried (the current session's minute bars).
+    A Yahoo "not_found" means the symbol is unknown and is returned
+    as-is without a fallback attempt. Results are cached in Redis.
+    """
+    symbol = symbol.upper()
+    cache_key = _history_cache_key(symbol)
+    try:
+        cached = REDIS_CLIENT.get_entry(cache_key)
+    except Exception:
+        cached = None
+    if cached is not None:
+        try:
+            return _history_from_dict(cached)
+        except Exception:
+            pass
+    history = _fetch_history_yahoo(symbol)
+    if history.error == "unavailable":
+        history = _fetch_history_nasdaq(symbol)
+    try:
+        REDIS_CLIENT.save_entry(
+            cache_key, history_to_dict(history), expiration=_HISTORY_CACHE_TTL_SECONDS
+        )
+    except Exception:
+        pass
+    return history

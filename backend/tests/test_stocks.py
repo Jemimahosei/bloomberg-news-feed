@@ -8,14 +8,23 @@ from unittest.mock import patch
 
 from app import stocks
 from app.stocks import (
+    History,
+    HistoryPoint,
     Quote,
+    _fetch_history_nasdaq,
+    _fetch_history_yahoo,
     _fetch_quote,
     _fetch_quote_nasdaq,
+    _fill_day_range,
+    _history_points_from_nasdaq,
+    _history_points_from_yahoo,
     _parse_nasdaq_number,
     _quote_from_meta,
     _quote_from_nasdaq,
     clean_symbols,
+    get_history,
     get_stocks,
+    history_to_dict,
     quote_to_dict,
 )
 
@@ -438,3 +447,323 @@ class TestFetchQuoteFallback(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _day_timestamp(day):
+    """Epoch seconds for midnight UTC on a November 2026 day."""
+    from datetime import datetime, timezone
+
+    return int(datetime(2026, 11, day, tzinfo=timezone.utc).timestamp())
+
+
+def _yahoo_history_payload():
+    """Build a Yahoo chart response with 3 daily candles (one null)."""
+    return {
+        "chart": {
+            "result": [
+                {
+                    "meta": {"symbol": "AAPL"},
+                    "timestamp": [_day_timestamp(18), _day_timestamp(19), _day_timestamp(20)],
+                    "indicators": {
+                        "quote": [
+                            {
+                                "close": [340.0, None, 342.56],
+                                "high": [344.0, 345.0, 354.3],
+                                "low": [338.0, 339.0, 340.56],
+                                "open": [342.0, 343.0, 350.0],
+                                "volume": [100, 200, 300],
+                            }
+                        ]
+                    },
+                }
+            ],
+            "error": None,
+        }
+    }
+
+
+def _nasdaq_chart_payload(points=3):
+    """Build a Nasdaq chart response with minute bars."""
+    base = 1795147200000  # Nov 20, 2026 04:00 UTC in ms
+    chart = [
+        {
+            "x": base + i * 60000,
+            "y": 350.0 + i,
+            "z": {"dateTime": "4:00 AM ET", "value": str(350.0 + i)},
+        }
+        for i in range(points)
+    ]
+    return {"data": {"symbol": "AAPL", "chart": chart}, "message": None, "status": {"rCode": 200}}
+
+
+class TestHistoryPointsFromYahoo(unittest.TestCase):
+    """Tests for _history_points_from_yahoo."""
+
+    def test_closes_highs_lows_parsed_and_null_skipped(self):
+        """Daily candles parse with OHLC; a null close is skipped."""
+        points = _history_points_from_yahoo(_yahoo_history_payload()["chart"]["result"][0])
+        self.assertEqual(len(points), 2)
+        self.assertEqual(points[0].date, "2026-11-18")
+        self.assertEqual(points[0].close, 340.0)
+        self.assertEqual(points[0].high, 344.0)
+        self.assertEqual(points[0].low, 338.0)
+        self.assertEqual(points[1].date, "2026-11-20")
+        self.assertEqual(points[1].close, 342.56)
+        self.assertEqual(points[1].high, 354.3)
+        self.assertEqual(points[1].low, 340.56)
+
+
+class TestFetchHistoryYahoo(unittest.TestCase):
+    """Tests for _fetch_history_yahoo with a mocked network."""
+
+    def test_success(self):
+        """A chart response becomes a month history."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_yahoo_history_payload())):
+            history = _fetch_history_yahoo("AAPL")
+        self.assertEqual(history.symbol, "AAPL")
+        self.assertEqual(history.source, "yahoo")
+        self.assertEqual(history.label, "Past month")
+        self.assertEqual(len(history.points), 2)
+        self.assertEqual(history.day_high, 354.3)
+        self.assertEqual(history.day_low, 340.56)
+        self.assertIsNone(history.error)
+
+    def test_chart_error_is_not_found(self):
+        """A chart error becomes a not_found history."""
+        payload = {"chart": {"result": None, "error": {"code": "Not Found"}}}
+        with patch("urllib.request.urlopen", return_value=_json_body(payload)):
+            history = _fetch_history_yahoo("ZZZZQQQ")
+        self.assertEqual(history.error, "not_found")
+        self.assertEqual(history.points, [])
+
+    def test_http_429_is_unavailable(self):
+        """An HTTP 429 becomes an unavailable history."""
+        with patch("urllib.request.urlopen", side_effect=_http_error(429, "Too Many Requests")):
+            history = _fetch_history_yahoo("AAPL")
+        self.assertEqual(history.error, "unavailable")
+
+
+class TestHistoryPointsFromNasdaq(unittest.TestCase):
+    """Tests for _history_points_from_nasdaq."""
+
+    def test_points_parsed(self):
+        """Minute bars parse to dated points."""
+        points = _history_points_from_nasdaq(_nasdaq_chart_payload(3)["data"]["chart"])
+        self.assertEqual(len(points), 3)
+        self.assertEqual(points[0].close, 350.0)
+        self.assertTrue(points[0].date.startswith("2026-11-20T04:00"))
+        self.assertIsNone(points[0].high)
+        self.assertIsNone(points[0].low)
+
+    def test_many_points_downsampled_keeping_ends(self):
+        """Hundreds of bars downsample to at most 121, keeping the ends."""
+        points = _history_points_from_nasdaq(_nasdaq_chart_payload(300)["data"]["chart"])
+        self.assertLessEqual(len(points), 121)
+        self.assertEqual(points[0].close, 350.0)
+        self.assertEqual(points[-1].close, 649.0)
+
+
+class TestFetchHistoryNasdaq(unittest.TestCase):
+    """Tests for _fetch_history_nasdaq with a mocked network."""
+
+    def test_success(self):
+        """A Nasdaq chart response becomes a session history."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_chart_payload())):
+            history = _fetch_history_nasdaq("AAPL")
+        self.assertEqual(history.source, "nasdaq")
+        self.assertEqual(history.label, "Today's session")
+        self.assertEqual(len(history.points), 3)
+        self.assertIsNone(history.error)
+
+    def test_day_range_is_session_max_min(self):
+        """The day range is the session's traded max/min."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_chart_payload())):
+            history = _fetch_history_nasdaq("AAPL")
+        self.assertEqual(history.day_high, 352.0)
+        self.assertEqual(history.day_low, 350.0)
+
+    def test_unknown_symbol_is_not_found(self):
+        """A 'Symbol not exists' response becomes not_found."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_unknown_payload())):
+            history = _fetch_history_nasdaq("ZZZZQQQ")
+        self.assertEqual(history.error, "not_found")
+
+
+class TestGetHistory(unittest.TestCase):
+    """Tests for get_history caching and fallback order."""
+
+    def test_yahoo_429_falls_back_to_nasdaq(self):
+        """A blocked Yahoo history is rescued by Nasdaq."""
+        fake = FakeRedis()
+        calls = [_http_error(429, "Too Many Requests"), _json_body(_nasdaq_chart_payload())]
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch("urllib.request.urlopen", side_effect=calls):
+                history = get_history("AAPL")
+        self.assertEqual(history.source, "nasdaq")
+        self.assertEqual(len(history.points), 3)
+        self.assertIsNone(history.error)
+
+    def test_yahoo_not_found_does_not_fall_back(self):
+        """A Yahoo not_found is returned without trying Nasdaq."""
+        fake = FakeRedis()
+        payload = {"chart": {"result": None, "error": {"code": "Not Found"}}}
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch("urllib.request.urlopen", return_value=_json_body(payload)) as mock:
+                history = get_history("ZZZZQQQ")
+        self.assertEqual(history.error, "not_found")
+        mock.assert_called_once()
+
+    def test_both_sources_failing_is_unavailable(self):
+        """When Yahoo and Nasdaq both fail, the history is unavailable."""
+        fake = FakeRedis()
+        calls = [_http_error(429, "Too Many Requests"), _http_error(403, "Forbidden")]
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch("urllib.request.urlopen", side_effect=calls):
+                history = get_history("AAPL")
+        self.assertEqual(history.error, "unavailable")
+        self.assertEqual(history.points, [])
+
+    def test_cache_hit_skips_fetch(self):
+        """A cached history is returned without fetching."""
+        fake = FakeRedis()
+        history = History(
+            "AAPL", "yahoo", "Past month", [HistoryPoint("2026-11-20", 342.56, 354.3, 340.56)]
+        )
+        fake.save_entry("history:AAPL", history_to_dict(history), expiration=900)
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch.object(
+                stocks, "_fetch_history_yahoo", side_effect=AssertionError("should not fetch")
+            ):
+                result = get_history("AAPL")
+        self.assertEqual(result, history)
+
+
+class TestFillDayRange(unittest.TestCase):
+    """Tests for _fill_day_range."""
+
+    def test_nasdaq_quote_gets_range_from_last_candle(self):
+        """A quote without a day range takes the last candle's high/low."""
+        quote = _quote_from_nasdaq("AAPL", _nasdaq_payload()["data"])
+        self.assertIsNone(quote.day_high)
+        history = History(
+            "AAPL",
+            "yahoo",
+            "Past month",
+            [
+                HistoryPoint("2026-11-19", 340.0, 344.0, 338.0),
+                HistoryPoint("2026-11-20", 342.56, 354.3, 340.56),
+            ],
+            day_high=354.3,
+            day_low=340.56,
+        )
+        with patch.object(stocks, "get_history", return_value=history):
+            _fill_day_range([quote])
+        self.assertEqual(quote.day_high, 354.3)
+        self.assertEqual(quote.day_low, 340.56)
+
+    def test_nasdaq_session_range_fills_from_session_max_min(self):
+        """A Nasdaq session history fills the range from its max/min."""
+        quote = _quote_from_nasdaq("AAPL", _nasdaq_payload()["data"])
+        history = History(
+            "AAPL",
+            "nasdaq",
+            "Today's session",
+            [HistoryPoint("2026-11-20T04:00:00+00:00", 350.0)],
+            day_high=352.0,
+            day_low=350.0,
+        )
+        with patch.object(stocks, "get_history", return_value=history):
+            _fill_day_range([quote])
+        self.assertEqual(quote.day_high, 352.0)
+        self.assertEqual(quote.day_low, 350.0)
+
+    def test_unavailable_history_leaves_dashes(self):
+        """When the history is unavailable, the day range stays empty."""
+        quote = _quote_from_nasdaq("AAPL", _nasdaq_payload()["data"])
+        with patch.object(
+            stocks, "get_history", return_value=History("AAPL", None, "", [], "unavailable")
+        ):
+            _fill_day_range([quote])
+        self.assertIsNone(quote.day_high)
+        self.assertIsNone(quote.day_low)
+
+    def test_quote_with_range_is_not_refetched(self):
+        """A quote that already has a day range triggers no history fetch."""
+        quote = _quote_from_meta("AAPL", _meta())
+        self.assertIsNotNone(quote.day_high)
+        with patch.object(
+            stocks, "get_history", side_effect=AssertionError("should not fetch")
+        ):
+            _fill_day_range([quote])
+        self.assertEqual(quote.day_high, 354.3)
+
+
+class TestGetStocksFillsDayRange(unittest.TestCase):
+    """Tests that get_stocks fills a Nasdaq quote's day range."""
+
+    def test_nasdaq_quote_day_range_filled(self):
+        """A watchlist quote from Nasdaq gets its day range filled."""
+        fake = FakeRedis()
+        quote = _quote_from_nasdaq("AAPL", _nasdaq_payload()["data"])
+        history = History(
+            "AAPL",
+            "yahoo",
+            "Past month",
+            [HistoryPoint("2026-11-20", 342.56, 354.3, 340.56)],
+            day_high=354.3,
+            day_low=340.56,
+        )
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch.object(stocks, "_fetch_quote", return_value=quote):
+                with patch.object(stocks, "get_history", return_value=history):
+                    result = get_stocks(["AAPL"])
+        self.assertEqual(result[0].day_high, 354.3)
+        self.assertEqual(result[0].day_low, 340.56)
+
+
+class TestHistoryRoute(unittest.TestCase):
+    """Tests for the /get-history Flask route."""
+
+    def test_route_returns_history_as_json(self):
+        """GET /get-history serves points through the Flask app."""
+        from app import create_app
+
+        fake = FakeRedis()
+        history = History(
+            "AAPL",
+            "yahoo",
+            "Past month",
+            [HistoryPoint("2026-11-20", 342.56, 354.3, 340.56)],
+            day_high=354.3,
+            day_low=340.56,
+        )
+        with (
+            patch("app.REDIS_CLIENT", fake),
+            patch.object(stocks, "REDIS_CLIENT", fake),
+            patch.object(stocks, "_fetch_history_yahoo", return_value=history),
+        ):
+            client = create_app().test_client()
+            response = client.get("/get-history?symbol=AAPL")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["symbol"], "AAPL")
+        self.assertEqual(data["source"], "yahoo")
+        self.assertEqual(data["label"], "Past month")
+        self.assertEqual(data["points"][0]["close"], 342.56)
+        self.assertEqual(data["points"][0]["high"], 354.3)
+        self.assertEqual(data["day_high"], 354.3)
+        self.assertEqual(data["day_low"], 340.56)
+
+    def test_route_without_symbol_is_400(self):
+        """GET /get-history with no symbol is a bad request."""
+        from app import create_app
+
+        fake = FakeRedis()
+        with (
+            patch("app.REDIS_CLIENT", fake),
+            patch.object(stocks, "REDIS_CLIENT", fake),
+        ):
+            client = create_app().test_client()
+            response = client.get("/get-history")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"], "not_found")

@@ -4,6 +4,8 @@ import { Article } from "@/utils/types";
 
 interface NewsCardProps {
     article: Article;
+    // Position in the full newsfeed list; the article page lives at /news/{index}.
+    index?: number;
 }
 
 function sourceInitial(article: Article): string {
@@ -18,7 +20,7 @@ function sourceInitial(article: Article): string {
     return (article.title || "?").trim().charAt(0).toUpperCase() || "?";
 }
 
-function FeaturedNewsCard({ article }: NewsCardProps) {
+function FeaturedNewsCard({ article, index }: NewsCardProps) {
     const [imgFailed, setImgFailed] = useState(false);
     const showImage = Boolean(article.image_url) && !imgFailed;
 
@@ -39,7 +41,13 @@ function FeaturedNewsCard({ article }: NewsCardProps) {
                 )}
             </div>
             <div className="featured-news-info">
-                <h2 className="featured-story-title">{article.title}</h2>
+                <h2 className="featured-story-title">
+                    {index !== undefined ? (
+                        <Link href={`/news/${index}`} className="featured-title-link">{article.title}</Link>
+                    ) : (
+                        article.title
+                    )}
+                </h2>
                 <p className="featured-story-summary">{article.body}</p>
                 {article.author && <span className="featured-story-author">By {article.author}</span>}
                 {article.url &&

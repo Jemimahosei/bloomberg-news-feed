@@ -23,15 +23,15 @@ There are plenty of different styling frameworks to use, and we encourage you to
 
 /* Featured News */
 .featured-news-card {
-  @apply grid grid-cols-1 md:grid-cols-2 gap-4
+  @apply grid grid-cols-1 md:grid-cols-2 gap-3
 }
 
 .featured-news-img-div {
-  @apply p-4 flex items-center min-w-0 bg-slate-100
+  @apply p-3 flex items-center min-w-0 bg-slate-100
 }
 
 .featured-news-img {
-  @apply object-cover w-full h-72
+  @apply object-cover w-full h-60
 }
 
 .featured-news-info {
@@ -39,20 +39,20 @@ There are plenty of different styling frameworks to use, and we encourage you to
 }
 
 .featured-story-title {
-  font-size: 2rem;
-  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
   font-weight: bold;
   text-align: center;
   font-family: "PT Serif", serif;
   overflow: hidden;
   max-width: 100%;
   line-height: 1.2;
-  @apply text-title text-left line-clamp-4;
+  @apply text-title text-left line-clamp-3;
 }
 
 .featured-story-summary {
   overflow: hidden;
-  @apply line-clamp-[8] text-body
+  @apply line-clamp-6 text-body
 }
 .featured-story-author {
   @apply justify-self-end self-end place-self-end
@@ -65,7 +65,7 @@ There are plenty of different styling frameworks to use, and we encourage you to
 }
 
 .stories-grid {
-  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:divide-x space-y-2 divide-slate-300 pb-2
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:divide-x space-y-2 divide-slate-300 pb-2
 }
 
 .stories-grid > *:first-child {
@@ -81,11 +81,11 @@ There are plenty of different styling frameworks to use, and we encourage you to
 }
 
 .news-img {
-  @apply object-cover w-full h-48
+  @apply object-cover w-full h-40
 }
 
 .news-info {
-  @apply p-4 h-full w-full min-w-0 flex flex-col items-start  border-slate-300
+  @apply p-3 h-full w-full min-w-0 flex flex-col items-start  border-slate-300
 }
 
 .story-title {
@@ -95,26 +95,27 @@ There are plenty of different styling frameworks to use, and we encourage you to
   overflow: hidden;
   max-width: 100%;
   line-height: 1.25;
-  @apply text-title text-left text-2xl pb-2 line-clamp-3;
+  @apply text-title text-left text-xl pb-2 line-clamp-3;
 }
 
 .story-summary {
   overflow: hidden;
-  @apply line-clamp-4 text-body
+  @apply line-clamp-3 text-body
 }
 
 .story-author {
   @apply pt-1 justify-self-end self-end place-self-end text-sm ;
 }
 
-/* NEWS */
+/* NEWS — Bloomberg-inspired black header: black masthead with an
+   orange rule, black nav bar, orange for the active page. */
 .nav-div {
-  @apply bg-primary w-full flex flex-wrap flex-col gap-4 items-center justify-between mx-auto pt-8 dark:bg-[color:--nav-color]
+  @apply bg-ink w-full flex flex-wrap flex-col gap-4 items-center justify-between mx-auto pt-6 border-b-4 border-primary dark:bg-[color:--nav-color]
 }
 
 .navbar-navigation-wrapper {
   font-family: "Inter", sans-serif;
-  @apply bg-secondary text-secondaryBackground w-full py-2 border-y border-gray-700 md:block md:w-auto
+  @apply bg-ink text-secondaryBackground w-full py-2 border-t border-gray-800 md:block md:w-auto
 }
 
 .navbar-list-wrapper {
@@ -134,7 +135,20 @@ There are plenty of different styling frameworks to use, and we encourage you to
 }
 
 #navbar-home-span {
-  @apply self-center text-4xl sm:text-5xl md:text-6xl font-light tracking-tighter whitespace-nowrap
+  @apply self-center text-4xl sm:text-5xl md:text-6xl font-light tracking-tighter whitespace-nowrap text-white
+}
+
+.masthead-mark {
+  @apply inline-block w-3 h-3 md:w-4 md:h-4 bg-primary shrink-0
+}
+
+.menu-item[aria-current="page"] {
+  @apply text-primary;
+}
+
+.story-title-link:hover,
+.featured-title-link:hover {
+  color: #FFA028;
 }
 
 .origin-link {
@@ -155,7 +169,7 @@ h2.instruction {
 
 .featured-news-heading {
   font-family: "PT Serif", serif;
-  @apply text-3xl font-bold text-title pb-2 mb-4 border-b border-slate-300;
+  @apply text-2xl font-bold text-title pb-2 mb-4 border-b-2 border-primary;
 }
 
 /* Fallback tile shown when an article image fails to load.
@@ -176,6 +190,77 @@ h2.instruction {
 .news-fallback-initial {
   font-family: "PT Serif", serif;
   @apply text-5xl font-bold text-slate-400;
+}
+
+/* Full article view */
+.article-detail-title {
+  font-family: "PT Serif", serif;
+  @apply text-3xl md:text-4xl font-bold text-title leading-tight pb-3;
+}
+
+.article-detail-byline {
+  @apply text-sm text-body pb-4;
+}
+
+.article-detail-img-div {
+  @apply flex items-center min-w-0 bg-slate-100 mb-4;
+}
+
+.article-detail-img {
+  @apply object-cover w-full max-h-[28rem];
+}
+
+.article-detail-fallback {
+  @apply flex items-center justify-center bg-slate-200 h-72 w-full;
+}
+
+.article-detail-fallback-initial {
+  font-family: "PT Serif", serif;
+  @apply text-7xl font-bold text-slate-400;
+}
+
+.article-detail-body p {
+  @apply pb-4 text-body leading-relaxed;
+}
+
+.article-detail-source {
+  @apply pt-2 text-sm;
+}
+
+/* Stock chart */
+.stock-chart-heading {
+  @apply text-lg font-bold text-title pb-2;
+}
+
+.stock-chart-label {
+  font-size: 11px;
+  fill: #64748b;
+}
+
+.stock-chart-range {
+  @apply pt-1 text-sm text-body;
+}
+
+/* Ticker tape under the nav: live watchlist quotes, black strip with
+   orange accents. Renders nothing while loading or on error. */
+.ticker-tape {
+  @apply bg-ink text-white text-xs flex overflow-x-auto whitespace-nowrap;
+}
+
+.ticker-tape-item {
+  @apply flex items-center gap-2 px-3 py-1.5 border-r border-gray-800;
+}
+
+.ticker-tape-symbol {
+  @apply font-bold;
+}
+
+.ticker-tape-up {
+  color: #22c55e;
+}
+
+.ticker-tape-down {
+  color: #ef4444;
 }
 /* END OF TECH LAB STYLES */
 

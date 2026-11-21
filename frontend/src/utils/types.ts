@@ -20,3 +20,18 @@ export interface Quote {
     as_of: string | null;
     error: string | null;
 }
+
+export interface HistoryPoint {
+    date: string;
+    close: number;
+    high: number | null;
+    low: number | null;
+}
+
+export interface HistoryResponse {
+    symbol: string;
+    source: string | null;
+    label: string;
+    points: HistoryPoint[];
+    error: string | null;
+}

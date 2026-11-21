@@ -8,6 +8,7 @@ export default function Navbar() {
             <div className="nav-div">
                 <Link href={'/'}>
                     <span id="navbar-home-span-wrapper">
+                        <span className="masthead-mark" aria-hidden="true" />
                         <span id="navbar-home-span">The Tech Lab Times</span>
                     </span>
                 </Link>

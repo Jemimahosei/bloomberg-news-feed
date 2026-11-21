@@ -53,4 +53,23 @@ def create_app():
         quotes = stocks.get_stocks(symbols)
         return jsonify([stocks.quote_to_dict(quote) for quote in quotes])
 
+    @app.route("/get-history", methods=["GET"])
+    def get_history_route() -> Response:
+        """Flask route to get a price history for one ticker.
+
+        ?symbol=AAPL serves the past month of daily closes (Yahoo),
+        falling back to the current session (Nasdaq) when Yahoo fails.
+        """
+        raw = request.args.get("symbol", "")
+        symbols = stocks.clean_symbols(raw)
+        if not symbols:
+            return (
+                jsonify(
+                    {"symbol": raw, "source": None, "label": "", "points": [], "error": "not_found"}
+                ),
+                400,
+            )
+        history = stocks.get_history(symbols[0])
+        return jsonify(stocks.history_to_dict(history))
+
     return app
