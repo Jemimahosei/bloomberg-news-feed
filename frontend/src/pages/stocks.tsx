@@ -117,6 +117,11 @@ export default function Stocks() {
 
     const displayed = searchResult ? [searchResult] : quotes;
     const asOf = displayed.map((q) => q.as_of).find(Boolean) ?? null;
+    // The whole feed failed when every watchlist quote came back with an
+    // error. Individual missing values still show as dashes; this banner
+    // says the feed itself is down instead of leaving silent dashes.
+    const feedFailed =
+        !searchResult && !loading && !loadError && quotes.length > 0 && quotes.every((q) => q.error);
 
     return (
         <div>
@@ -155,6 +160,11 @@ export default function Stocks() {
                 <p className="text-body">No quotes to show right now.</p>
             ) : (
                 <>
+                    {feedFailed && (
+                        <p className="pb-4 font-bold text-red-600">
+                            Quotes unavailable right now — try again shortly.
+                        </p>
+                    )}
                     {asOf && <p className="pb-2 text-sm text-body">Quotes as of {formatAsOf(asOf)}</p>}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left">
@@ -177,7 +187,7 @@ export default function Stocks() {
                         </table>
                     </div>
                     <p className="pt-4 text-sm text-body">
-                        Quotes from Yahoo Finance. Prices show the last close when markets are closed.
+                        Quotes from Yahoo Finance and Nasdaq. Prices show the last close when markets are closed.
                     </p>
                 </>
             )}

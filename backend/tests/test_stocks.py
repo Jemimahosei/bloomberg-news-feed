@@ -7,7 +7,17 @@ import urllib.error
 from unittest.mock import patch
 
 from app import stocks
-from app.stocks import Quote, _fetch_quote, _quote_from_meta, clean_symbols, get_stocks, quote_to_dict
+from app.stocks import (
+    Quote,
+    _fetch_quote,
+    _fetch_quote_nasdaq,
+    _parse_nasdaq_number,
+    _quote_from_meta,
+    _quote_from_nasdaq,
+    clean_symbols,
+    get_stocks,
+    quote_to_dict,
+)
 
 
 def _meta(**overrides):
@@ -267,6 +277,163 @@ class TestStocksRoute(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         symbols = [item["symbol"] for item in response.get_json()]
         self.assertEqual(symbols, stocks.DEFAULT_SYMBOLS)
+
+
+def _nasdaq_payload(symbol="AAPL", **overrides):
+    """Build a Nasdaq quote info response with test values."""
+    data = {
+        "symbol": symbol,
+        "companyName": "Apple Inc. Common Stock",
+        "primaryData": {
+            "lastSalePrice": "$342.56",
+            "netChange": "-6.65",
+            "percentageChange": "-1.90%",
+            "lastTradeTimestamp": "Nov 20, 2026",
+            "volume": "80,692,545",
+        },
+    }
+    data.update(overrides)
+    return {"data": data, "message": None, "status": {"rCode": 200}}
+
+
+def _nasdaq_unknown_payload():
+    """Build a Nasdaq response for a symbol that does not exist."""
+    return {
+        "data": None,
+        "message": None,
+        "status": {
+            "rCode": 400,
+            "bCodeMessage": [{"code": 1001, "errorMessage": "Symbol not exists."}],
+        },
+    }
+
+
+def _http_error(code, message):
+    """Build an HTTPError with the given status code."""
+    return urllib.error.HTTPError("http://x", code, message, hdrs=None, fp=None)
+
+
+def _json_body(payload):
+    """Wrap a JSON payload as a urlopen response body."""
+    return io.BytesIO(json.dumps(payload).encode("utf-8"))
+
+
+class TestParseNasdaqNumber(unittest.TestCase):
+    """Tests for _parse_nasdaq_number."""
+
+    def test_dollar_and_commas_stripped(self):
+        """A dollar string with commas parses to a float."""
+        self.assertEqual(_parse_nasdaq_number("$1,234.56"), 1234.56)
+
+    def test_percent_stripped(self):
+        """A percent string parses to a plain float."""
+        self.assertEqual(_parse_nasdaq_number("-1.90%"), -1.90)
+
+    def test_na_and_none_become_none(self):
+        """N/A and missing values parse to None."""
+        self.assertIsNone(_parse_nasdaq_number("N/A"))
+        self.assertIsNone(_parse_nasdaq_number(None))
+
+    def test_number_passes_through(self):
+        """A plain number passes through as a float."""
+        self.assertEqual(_parse_nasdaq_number(42), 42.0)
+
+
+class TestQuoteFromNasdaq(unittest.TestCase):
+    """Tests for _quote_from_nasdaq."""
+
+    def test_fields_map_and_name_cleaned(self):
+        """Nasdaq fields map onto the quote and the name is cleaned."""
+        quote = _quote_from_nasdaq("AAPL", _nasdaq_payload()["data"])
+        self.assertEqual(quote.symbol, "AAPL")
+        self.assertEqual(quote.name, "Apple Inc.")
+        self.assertEqual(quote.price, 342.56)
+        self.assertEqual(quote.previous_close, 349.21)
+        self.assertEqual(quote.change, -6.65)
+        self.assertEqual(quote.change_percent, -1.90)
+        self.assertIsNone(quote.day_high)
+        self.assertIsNone(quote.day_low)
+        self.assertEqual(quote.volume, 80692545)
+        self.assertEqual(quote.as_of.isoformat(), "2026-11-20T00:00:00+00:00")
+        self.assertIsNone(quote.error)
+
+    def test_class_share_name_cleaned(self):
+        """A class-share suffix is stripped from the company name."""
+        payload = _nasdaq_payload(companyName="Alphabet Inc. Class A Common Stock")
+        quote = _quote_from_nasdaq("GOOGL", payload["data"])
+        self.assertEqual(quote.name, "Alphabet Inc.")
+
+    def test_missing_fields_become_none(self):
+        """A bare Nasdaq object gives a quote with no values."""
+        quote = _quote_from_nasdaq("AAPL", {"symbol": "AAPL"})
+        self.assertIsNone(quote.name)
+        self.assertIsNone(quote.price)
+        self.assertIsNone(quote.as_of)
+
+
+class TestFetchQuoteNasdaq(unittest.TestCase):
+    """Tests for _fetch_quote_nasdaq with a mocked network."""
+
+    def test_success(self):
+        """A Nasdaq info response becomes a quote."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_payload())):
+            quote = _fetch_quote_nasdaq("AAPL")
+        self.assertEqual(quote.price, 342.56)
+        self.assertIsNone(quote.error)
+
+    def test_unknown_symbol_is_not_found(self):
+        """A 'Symbol not exists' response becomes not_found."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_unknown_payload())):
+            quote = _fetch_quote_nasdaq("ZZZZQQQ")
+        self.assertEqual(quote.error, "not_found")
+        self.assertIsNone(quote.price)
+
+    def test_http_404_is_not_found(self):
+        """An HTTP 404 becomes a not_found quote."""
+        with patch("urllib.request.urlopen", side_effect=_http_error(404, "Not Found")):
+            quote = _fetch_quote_nasdaq("ZZZZQQQ")
+        self.assertEqual(quote.error, "not_found")
+
+    def test_http_403_is_unavailable(self):
+        """An HTTP 403 becomes an unavailable quote."""
+        with patch("urllib.request.urlopen", side_effect=_http_error(403, "Forbidden")):
+            quote = _fetch_quote_nasdaq("AAPL")
+        self.assertEqual(quote.error, "unavailable")
+
+
+class TestFetchQuoteFallback(unittest.TestCase):
+    """Tests for the Yahoo-first, Nasdaq-fallback order in _fetch_quote."""
+
+    def test_yahoo_429_falls_back_to_nasdaq(self):
+        """A blocked Yahoo fetch is rescued by the Nasdaq fallback."""
+        calls = [_http_error(429, "Too Many Requests"), _json_body(_nasdaq_payload())]
+        with patch("urllib.request.urlopen", side_effect=calls):
+            quote = _fetch_quote("AAPL")
+        self.assertEqual(quote.price, 342.56)
+        self.assertEqual(quote.name, "Apple Inc.")
+        self.assertIsNone(quote.error)
+
+    def test_yahoo_404_does_not_fall_back(self):
+        """A Yahoo not_found is returned without trying Nasdaq."""
+        with patch("urllib.request.urlopen", side_effect=_http_error(404, "Not Found")) as mock:
+            quote = _fetch_quote("ZZZZQQQ")
+        self.assertEqual(quote.error, "not_found")
+        mock.assert_called_once()
+
+    def test_both_sources_failing_is_unavailable(self):
+        """When Yahoo and Nasdaq both fail, the quote is unavailable."""
+        calls = [_http_error(429, "Too Many Requests"), _http_error(403, "Forbidden")]
+        with patch("urllib.request.urlopen", side_effect=calls):
+            quote = _fetch_quote("AAPL")
+        self.assertEqual(quote.error, "unavailable")
+        self.assertIsNone(quote.price)
+
+    def test_yahoo_down_nasdaq_unknown_is_not_found(self):
+        """A down Yahoo plus an unknown Nasdaq symbol is not_found."""
+        calls = [_http_error(429, "Too Many Requests"), _json_body(_nasdaq_unknown_payload())]
+        with patch("urllib.request.urlopen", side_effect=calls):
+            quote = _fetch_quote("ZZZZQQQ")
+        self.assertEqual(quote.error, "not_found")
 
 
 if __name__ == "__main__":
