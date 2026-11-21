@@ -110,7 +110,7 @@ There are plenty of different styling frameworks to use, and we encourage you to
 /* NEWS — Bloomberg-inspired black header: black masthead with an
    orange rule, black nav bar, orange for the active page. */
 .nav-div {
-  @apply bg-ink w-full flex flex-wrap flex-col gap-4 items-center justify-between mx-auto pt-6 border-b-4 border-primary dark:bg-[color:--nav-color]
+  @apply bg-ink w-full flex flex-wrap flex-col gap-4 items-center justify-between mx-auto pt-6 border-b-4 border-primary
 }
 
 .navbar-navigation-wrapper {
@@ -127,7 +127,7 @@ There are plenty of different styling frameworks to use, and we encourage you to
 }
 
 .navbar-navigation-buttons {
-  @apply font-bold flex flex-col p-4 md:p-0 mt-4 border border-gray-100 rounded-lg md:flex-row md:space-x-8 rtl:space-x-reverse md:mt-0 md:border-0 md:bg-white  md:dark:bg-[color:--nav-color] dark:border-gray-700
+  @apply font-bold flex flex-col p-4 md:p-0 mt-4 border border-gray-100 rounded-lg md:flex-row md:space-x-8 rtl:space-x-reverse md:mt-0 md:border-0 md:bg-white dark:border-gray-700
 }
 
 #navbar-home-span-wrapper {
