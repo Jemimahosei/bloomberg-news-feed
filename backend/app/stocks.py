@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.utils.redis import REDIS_CLIENT
@@ -323,7 +323,15 @@ YAHOO_HISTORY_URL = (
     "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1mo&interval=1d"
 )
 NASDAQ_CHART_URL = "https://api.nasdaq.com/api/quote/{symbol}/chart?assetclass=stocks"
+NASDAQ_HISTORY_URL = (
+    "https://api.nasdaq.com/api/quote/{symbol}/historical"
+    "?assetclass=stocks&fromdate={fromdate}&todate={todate}&limit=31"
+)
 _HISTORY_CACHE_TTL_SECONDS = 900
+# The single-session fallback is a last resort (it answers a different
+# question than the month view), so it is cached only briefly — one
+# Yahoo hiccup must not pin the chart to one session for 15 minutes.
+_HISTORY_FALLBACK_CACHE_TTL_SECONDS = 120
 _MAX_HISTORY_POINTS = 120
 
 
@@ -512,18 +520,93 @@ def _fetch_history_nasdaq(symbol: str) -> History:
     )
 
 
+def _history_points_from_nasdaq_daily(rows: list[dict[str, Any]]) -> list[HistoryPoint]:
+    """Parse Nasdaq historical rows (newest first) into daily points.
+
+    Rows carry "MM/DD/YYYY" dates and "$1,234.56" numbers. The result
+    is flipped to oldest-first, the order the chart is drawn in.
+    """
+    points: list[HistoryPoint] = []
+    for row in rows or []:
+        try:
+            date = datetime.strptime(row.get("date", ""), "%m/%d/%Y").date().isoformat()
+        except (TypeError, ValueError):
+            continue
+        close = _parse_nasdaq_number(row.get("close"))
+        if close is None:
+            continue
+        points.append(
+            HistoryPoint(
+                date=date,
+                close=close,
+                high=_parse_nasdaq_number(row.get("high")),
+                low=_parse_nasdaq_number(row.get("low")),
+            )
+        )
+    return list(reversed(points))
+
+
+def _fetch_history_nasdaq_daily(symbol: str) -> History:
+    """Fetch a month of daily closes from the Nasdaq historical API.
+
+    The middle fallback: Yahoo's chart API frequently rate-limits
+    datacenter IPs (it failed persistently from Render while the
+    quote endpoint on the same host worked), which used to drop the
+    chart straight to the single-session view. Nasdaq's historical
+    endpoint serves the same month of daily bars from a host this
+    app already reaches. No API key is needed.
+    """
+    today = datetime.now(timezone.utc).date()
+    url = NASDAQ_HISTORY_URL.format(
+        symbol=symbol,
+        fromdate=(today - timedelta(days=45)).isoformat(),
+        todate=today.isoformat(),
+    )
+    request = urllib.request.Request(
+        url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        logger.warning("Nasdaq daily history fetch failed for %s: HTTP %s", symbol, e.code)
+        error = "not_found" if e.code == 404 else "unavailable"
+        return History(symbol, None, "", [], error)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as e:
+        logger.warning(
+            "Nasdaq daily history fetch failed for %s: %s", symbol, type(e).__name__
+        )
+        return History(symbol, None, "", [], "unavailable")
+    data = payload.get("data") or {}
+    rows = (data.get("tradesTable") or {}).get("rows") or []
+    if not rows:
+        message = json.dumps(payload.get("status") or {})
+        error = "not_found" if "not exists" in message.lower() else "unavailable"
+        return History(symbol, None, "", [], error)
+    points = _history_points_from_nasdaq_daily(rows)
+    if not points:
+        return History(symbol, None, "", [], "unavailable")
+    last = points[-1]
+    return History(
+        symbol, "nasdaq", "Past month", points, day_high=last.high, day_low=last.low
+    )
+
+
 def _history_cache_key(symbol: str) -> str:
     """Build the Redis cache key for a symbol's history."""
     return "history:" + symbol
 
 
 def get_history(symbol: str) -> History:
-    """Get a price history for one symbol, Yahoo first, Nasdaq fallback.
+    """Get a price history for one symbol: a month of daily closes.
 
-    Yahoo serves a month of daily closes. Only when Yahoo fails with
-    "unavailable" is Nasdaq tried (the current session's minute bars).
-    A Yahoo "not_found" means the symbol is unknown and is returned
-    as-is without a fallback attempt. Results are cached in Redis.
+    Yahoo first; when Yahoo is "unavailable" (its chart API often
+    rate-limits datacenter IPs), Nasdaq's historical endpoint serves
+    the same month of daily bars; the Nasdaq single-session chart is
+    the last resort. A Yahoo "not_found" means the symbol is unknown
+    and is returned as-is without a fallback attempt. Month views are
+    cached for 15 minutes; the session fallback for only 2, so it
+    never sticks around after the daily sources recover.
     """
     symbol = symbol.upper()
     cache_key = _history_cache_key(symbol)
@@ -538,11 +621,16 @@ def get_history(symbol: str) -> History:
             pass
     history = _fetch_history_yahoo(symbol)
     if history.error == "unavailable":
+        history = _fetch_history_nasdaq_daily(symbol)
+    if history.error == "unavailable":
         history = _fetch_history_nasdaq(symbol)
+    ttl = (
+        _HISTORY_FALLBACK_CACHE_TTL_SECONDS
+        if history.label == "Today's session"
+        else _HISTORY_CACHE_TTL_SECONDS
+    )
     try:
-        REDIS_CLIENT.save_entry(
-            cache_key, history_to_dict(history), expiration=_HISTORY_CACHE_TTL_SECONDS
-        )
+        REDIS_CLIENT.save_entry(cache_key, history_to_dict(history), expiration=ttl)
     except Exception:
         pass
     return history

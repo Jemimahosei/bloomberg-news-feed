@@ -12,11 +12,13 @@ from app.stocks import (
     HistoryPoint,
     Quote,
     _fetch_history_nasdaq,
+    _fetch_history_nasdaq_daily,
     _fetch_history_yahoo,
     _fetch_quote,
     _fetch_quote_nasdaq,
     _fill_day_range,
     _history_points_from_nasdaq,
+    _history_points_from_nasdaq_daily,
     _history_points_from_yahoo,
     _parse_nasdaq_number,
     _quote_from_meta,
@@ -482,6 +484,28 @@ def _yahoo_history_payload():
     }
 
 
+def _nasdaq_daily_payload():
+    """Build a Nasdaq historical (daily bars) response, newest first."""
+    return {
+        "data": {
+            "symbol": "AAPL",
+            "totalRecords": 3,
+            "tradesTable": {
+                "rows": [
+                    {"date": "11/20/2026", "close": "$342.56", "volume": "80,692,545",
+                     "open": "$348.00", "high": "$354.30", "low": "$340.56"},
+                    {"date": "11/19/2026", "close": "$340.00", "volume": "70,000,000",
+                     "open": "$338.00", "high": "$344.00", "low": "$336.00"},
+                    {"date": "11/18/2026", "close": "$336.50", "volume": "65,000,000",
+                     "open": "$335.00", "high": "$339.00", "low": "$333.00"},
+                ]
+            },
+        },
+        "message": None,
+        "status": {"rCode": 200},
+    }
+
+
 def _nasdaq_chart_payload(points=3):
     """Build a Nasdaq chart response with minute bars."""
     base = 1795147200000  # Nov 20, 2026 04:00 UTC in ms
@@ -589,19 +613,73 @@ class TestFetchHistoryNasdaq(unittest.TestCase):
         self.assertEqual(history.error, "not_found")
 
 
+
+class TestHistoryPointsFromNasdaqDaily(unittest.TestCase):
+    """Tests for _history_points_from_nasdaq_daily."""
+
+    def test_rows_parsed_oldest_first(self):
+        """Newest-first $ rows become oldest-first clean points."""
+        points = _history_points_from_nasdaq_daily(
+            _nasdaq_daily_payload()["data"]["tradesTable"]["rows"]
+        )
+        self.assertEqual(len(points), 3)
+        self.assertEqual(points[0].date, "2026-11-18")
+        self.assertEqual(points[-1].date, "2026-11-20")
+        self.assertEqual(points[-1].close, 342.56)
+        self.assertEqual(points[-1].high, 354.30)
+        self.assertEqual(points[-1].low, 340.56)
+
+
+class TestFetchHistoryNasdaqDaily(unittest.TestCase):
+    """Tests for _fetch_history_nasdaq_daily with a mocked network."""
+
+    def test_success_is_a_past_month_history(self):
+        """A daily response becomes a 'Past month' nasdaq history."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_daily_payload())):
+            history = _fetch_history_nasdaq_daily("AAPL")
+        self.assertEqual(history.source, "nasdaq")
+        self.assertEqual(history.label, "Past month")
+        self.assertEqual(len(history.points), 3)
+        self.assertIsNone(history.error)
+        self.assertEqual(history.day_high, 354.30)
+        self.assertEqual(history.day_low, 340.56)
+
+    def test_unknown_symbol_is_not_found(self):
+        """A 'Symbol not exists' response becomes not_found."""
+        with patch("urllib.request.urlopen", return_value=_json_body(_nasdaq_unknown_payload())):
+            history = _fetch_history_nasdaq_daily("ZZZZQQQ")
+        self.assertEqual(history.error, "not_found")
+
+
 class TestGetHistory(unittest.TestCase):
     """Tests for get_history caching and fallback order."""
 
-    def test_yahoo_429_falls_back_to_nasdaq(self):
-        """A blocked Yahoo history is rescued by Nasdaq."""
+    def test_yahoo_429_falls_back_to_nasdaq_daily(self):
+        """A blocked Yahoo history is rescued by Nasdaq's daily bars."""
         fake = FakeRedis()
-        calls = [_http_error(429, "Too Many Requests"), _json_body(_nasdaq_chart_payload())]
+        calls = [_http_error(429, "Too Many Requests"), _json_body(_nasdaq_daily_payload())]
         with patch.object(stocks, "REDIS_CLIENT", fake):
             with patch("urllib.request.urlopen", side_effect=calls):
                 history = get_history("AAPL")
         self.assertEqual(history.source, "nasdaq")
+        self.assertEqual(history.label, "Past month")
         self.assertEqual(len(history.points), 3)
         self.assertIsNone(history.error)
+
+    def test_daily_failure_falls_back_to_session(self):
+        """Yahoo and Nasdaq daily down: the session chart is the last resort."""
+        fake = FakeRedis()
+        calls = [
+            _http_error(429, "Too Many Requests"),
+            _http_error(403, "Forbidden"),
+            _json_body(_nasdaq_chart_payload()),
+        ]
+        with patch.object(stocks, "REDIS_CLIENT", fake):
+            with patch("urllib.request.urlopen", side_effect=calls):
+                history = get_history("AAPL")
+        self.assertEqual(history.source, "nasdaq")
+        self.assertEqual(history.label, "Today's session")
+        self.assertEqual(len(history.points), 3)
 
     def test_yahoo_not_found_does_not_fall_back(self):
         """A Yahoo not_found is returned without trying Nasdaq."""
@@ -614,9 +692,13 @@ class TestGetHistory(unittest.TestCase):
         mock.assert_called_once()
 
     def test_both_sources_failing_is_unavailable(self):
-        """When Yahoo and Nasdaq both fail, the history is unavailable."""
+        """When every source fails, the history is unavailable."""
         fake = FakeRedis()
-        calls = [_http_error(429, "Too Many Requests"), _http_error(403, "Forbidden")]
+        calls = [
+            _http_error(429, "Too Many Requests"),
+            _http_error(403, "Forbidden"),
+            _http_error(403, "Forbidden"),
+        ]
         with patch.object(stocks, "REDIS_CLIENT", fake):
             with patch("urllib.request.urlopen", side_effect=calls):
                 history = get_history("AAPL")
