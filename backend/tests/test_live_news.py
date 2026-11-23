@@ -88,6 +88,47 @@ class TestFetchLiveArticles(unittest.TestCase):
             )
         self.assertEqual(len(articles), 2)
 
+    def test_missing_images_backfilled_from_article_pages(self):
+        """A story with no feed image gains its page's og:image."""
+        page = (
+            b'<html><head><meta property="og:image" itemProp="image" '
+            b'content="https://img.example.com/two.jpg?a=1&amp;b=2" />'
+            b"</head></html>"
+        )
+
+        def router_urlopen(request, timeout=0):
+            if request.full_url.endswith("/rss"):
+                return io.BytesIO(RSS)
+            if request.full_url.endswith("story-2"):
+                return io.BytesIO(page)
+            return io.BytesIO(b"<html></html>")
+
+        with mock.patch.object(urllib.request, "urlopen", side_effect=router_urlopen):
+            articles = live_news.fetch_live_articles(
+                feeds=[("Example", "https://feed/rss")]
+            )
+        by_url = {a["url"]: a for a in articles}
+        self.assertEqual(
+            by_url["https://example.com/story-2"]["thread"]["main_image"],
+            "https://img.example.com/two.jpg?a=1&b=2",
+        )
+        # A story that already had a feed image keeps it untouched.
+        self.assertEqual(
+            by_url["https://example.com/story-1"]["thread"]["main_image"],
+            "https://img.example.com/one.jpg",
+        )
+
+
+class TestExtractOgImage(unittest.TestCase):
+    def test_extracts_and_unescapes(self):
+        page = '<meta property="og:image" content="https://i/x.jpg?a=1&amp;b=2" />'
+        self.assertEqual(
+            live_news.extract_og_image(page), "https://i/x.jpg?a=1&b=2"
+        )
+
+    def test_no_og_image(self):
+        self.assertEqual(live_news.extract_og_image("<html></html>"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

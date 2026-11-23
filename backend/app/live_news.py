@@ -19,6 +19,7 @@ import threading
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -43,6 +44,8 @@ _NS = {
 _TAG_RE = re.compile(r"<[^>]+>")
 _IMG_RE = re.compile(r'<img[^>]+src="([^"]+)"')
 _WS_RE = re.compile(r"\s+")
+_OG_IMAGE_RE = re.compile(r'og:image"[^>]*?content="([^"]+)"')
+_PAGE_READ_LIMIT = 262144  # og:image lives in <head>; no need for the full page
 
 
 def _clean_text(raw: str) -> str:
@@ -105,6 +108,51 @@ def parse_feed(xml_bytes: bytes, source: str) -> list[dict]:
     return records
 
 
+def extract_og_image(page_html: str) -> str:
+    """The article page's og:image URL, or "" when it has none."""
+    match = _OG_IMAGE_RE.search(page_html or "")
+    return html.unescape(match.group(1)) if match else ""
+
+
+def _fetch_og_image(article_url: str) -> str:
+    """Fetch an article page just far enough to read its og:image."""
+    try:
+        request = urllib.request.Request(
+            article_url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/126.0 Safari/537.36"
+                )
+            },
+        )
+        with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            head = response.read(_PAGE_READ_LIMIT).decode("utf-8", errors="replace")
+        return extract_og_image(head)
+    except Exception:
+        return ""
+
+
+def _backfill_images(articles: list[dict]) -> None:
+    """Fill missing images from the articles' own pages.
+
+    CNBC's RSS carries no images at all (BBC's does), which left most
+    cards showing the placeholder. Each article page names its image
+    in og:image, so fetch those — concurrently, and only for the
+    records that need one.
+    """
+    missing = [a for a in articles if not a["thread"]["main_image"]]
+    if not missing:
+        return
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for article, image_url in zip(
+            missing, pool.map(lambda a: _fetch_og_image(a["url"]), missing)
+        ):
+            if image_url:
+                article["thread"]["main_image"] = image_url
+
+
 def fetch_live_articles(feeds=FEEDS) -> list[dict]:
     """Fetch every feed, merge, dedupe by URL, newest first."""
     merged: dict[str, dict] = {}
@@ -123,7 +171,9 @@ def fetch_live_articles(feeds=FEEDS) -> list[dict]:
         key=lambda record: record["published"],
         reverse=True,
     )
-    return articles[:MAX_ARTICLES]
+    articles = articles[:MAX_ARTICLES]
+    _backfill_images(articles)
+    return articles
 
 
 def refresh_news(redis_client) -> int:
