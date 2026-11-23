@@ -5,7 +5,7 @@ from dataclasses import asdict
 
 from flask import Flask, Response, jsonify, request
 
-from app import newsfeed, stocks
+from app import live_news, newsfeed, stocks
 from app.utils.file_loader import load_json_files
 from app.utils.redis import REDIS_CLIENT
 
@@ -21,9 +21,17 @@ def create_app():
     """Create a Flask app instance."""
     app = Flask("app")
 
-    # Load JSON files into Redis
+    # Load JSON files into Redis. The bundled dataset is only the
+    # seed/fallback — it is a fixed set of 2018 articles, so on its
+    # own the feed would show the same stories forever.
     dataset_directory = os.path.join(os.path.dirname(__file__), "../resources/dataset/news")
     REDIS_CLIENT.save_entry("all_articles", load_json_files(dataset_directory))
+
+    # Live headlines: a background thread replaces the seed with
+    # current RSS articles shortly after startup and refreshes them
+    # every 30 minutes. Set NEWS_LIVE_REFRESH=off to keep the seed.
+    if os.environ.get("NEWS_LIVE_REFRESH", "on").lower() != "off":
+        live_news.start_refresher(REDIS_CLIENT)
 
     @app.route("/ping", methods=["GET"])
     def ping() -> Response:
